@@ -39,6 +39,9 @@
 /* USER CODE BEGIN PM */
 volatile float32_t g_out_freq_hz = 50.0f;   // 输出频率 50Hz
 volatile float32_t g_mod_index = 0.8f;      // 调制指数
+volatile float32_t g_phase_deg = 0.0f;   // 当前相位
+volatile float32_t g_tsw_min = 25.0e-6f;        // 最小开关周期 (40kHz max)
+volatile float32_t g_tsw_max = 100.0e-6f;       // 最大开关周期 (10kHz min)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -677,8 +680,39 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM7)
   {
-    //  你的中断代码写在这里
-    // TIM1有三个正好用于DPWM三相电
+    // 50Hz相位递增
+    const float32_t t_s = 1.0f / 20000.0f;
+    g_phase_deg += g_out_freq_hz * 360.0f * t_s;
+    if (g_phase_deg >= 360.0f) {
+      g_phase_deg -= 360.0f;
+    }
+
+    // 正弦调制
+    float32_t sin_val;
+    arm_sin_cos_f32(g_phase_deg, &sin_val, NULL);
+
+    // TCM ZVS: 开关周期随正弦变化
+    // |sin| 大 → 电流大 → 开关周期小 (频率高)
+    // |sin| 小 → 电流小 → 开关周期大 (频率低)
+    float32_t abs_sin = (sin_val >= 0) ? sin_val : -sin_val;
+
+    // 计算开关周期: Tsw = Tsw_max - (Tsw_max - Tsw_min) * |sin| * mod_index
+    float32_t t_sw = g_tsw_max - (g_tsw_max - g_tsw_min) * abs_sin * g_mod_index;
+
+    // 限幅
+    if (t_sw < g_tsw_min) t_sw = g_tsw_min;
+    if (t_sw > g_tsw_max) t_sw = g_tsw_max;
+
+    // 转换为ARR值 (80MHz时钟)
+    // ARR = Tsw * 80MHz - 1
+    uint32_t arr = (uint32_t)(t_sw * 80000000.0f) - 1;
+
+    // 改变TIM1周期（频率）
+    __HAL_TIM_SET_AUTORELOAD(&htim1, arr);
+
+    // TCM通常用50%占空比
+    uint32_t ccr = arr / 2;
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ccr);
 
   }
 }
