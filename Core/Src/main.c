@@ -671,7 +671,14 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+//时钟7的中断，20khz
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM7)
+  {
+    // 你的中断代码写在这里
+  }
+}
 /* USER CODE END 4 */
 
 /**
