@@ -57,17 +57,14 @@ set(STM32_Drivers_Src
 # CMSIS DSP Library Source Files
 set(CMSIS_DSP_Src
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/BasicMathFunctions/BasicMathFunctions.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/BayesFunctions/BayesFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/CommonTables/CommonTables.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/ComplexMathFunctions/ComplexMathFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/ControllerFunctions/ControllerFunctions.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/DistanceFunctions/DistanceFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/FastMathFunctions/FastMathFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/FilteringFunctions/FilteringFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/MatrixFunctions/MatrixFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/StatisticsFunctions/StatisticsFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/SupportFunctions/SupportFunctions.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/SVMFunctions/SVMFunctions.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/CMSIS/DSP/Source/TransformFunctions/TransformFunctions.c
 )
 
@@ -105,7 +102,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${MX_Application_Src})
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE ${MX_LINK_DIRS})
 
 # Add libraries to the project
-target_link_libraries(${CMAKE_PROJECT_NAME} ${MX_LINK_LIBS})
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE ${MX_LINK_LIBS})
 
 # Link stm32cubemx interface to main project for includes
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE stm32cubemx)
