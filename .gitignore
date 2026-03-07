@@ -1,15 +1,14 @@
 # CLion
 .idea/
 cmake-build-*/
-CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
 Makefile
 
 # Build output
-build/
-Release/
 Debug/
+build/Release/*
+!build/Release/CMakeCache.txt
 *.bin
 *.elf
 *.hex
