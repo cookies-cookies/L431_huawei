@@ -695,7 +695,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     // |sin| 大 → 电流大 → 开关周期小 (频率高)
     // |sin| 小 → 电流小 → 开关周期大 (频率低)
     float32_t abs_sin = (sin_val >= 0) ? sin_val : -sin_val;
-
     // 计算开关周期: Tsw = Tsw_max - (Tsw_max - Tsw_min) * |sin| * mod_index
     float32_t t_sw = g_tsw_max - (g_tsw_max - g_tsw_min) * abs_sin * g_mod_index;
 
