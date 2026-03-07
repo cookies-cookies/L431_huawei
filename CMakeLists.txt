@@ -50,11 +50,33 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Include
 )
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
+)
+
+# CMSIS DSP Library Source Files
+set(CMSIS_DSP_Src
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/BasicMathFunctions/BasicMathFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/CommonTables/CommonTables.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/ComplexMathFunctions/ComplexMathFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/ControllerFunctions/ControllerFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/FastMathFunctions/FastMathFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/FilteringFunctions/FilteringFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/MatrixFunctions/MatrixFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/StatisticsFunctions/StatisticsFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/SupportFunctions/SupportFunctions.c
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Source/TransformFunctions/TransformFunctions.c
+)
+
+# Create CMSIS DSP library
+add_library(CMSIS_DSP STATIC ${CMSIS_DSP_Src})
+target_include_directories(CMSIS_DSP PRIVATE 
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/DSP/Include
+    ${CMAKE_SOURCE_DIR}/Drivers/CMSIS/Include
 )
 
 # Remove wrong libob.a library dependency when using cpp files
@@ -63,6 +85,7 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
     stm32cubemx
+    CMSIS_DSP
 
     # Add user defined libraries
 )
