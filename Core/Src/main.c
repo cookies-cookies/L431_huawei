@@ -18,11 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "arm_math.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "arm_math.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -39,9 +38,21 @@
 /* USER CODE BEGIN PM */
 volatile float32_t g_out_freq_hz = 50.0f;   // 输出频率 50Hz
 volatile float32_t g_mod_index = 0.8f;      // 调制指数
-volatile float32_t g_phase_deg = 0.0f;   // 当前相位
-volatile float32_t g_tsw_min = 25.0e-6f;        // 最小开关周期 (40kHz max)
-volatile float32_t g_tsw_max = 100.0e-6f;       // 最大开关周期 (10kHz min)
+volatile float32_t g_phase_deg = 0.0f;      // 当前相位 (A相)
+volatile float32_t g_fsw_center = 40000.0f;    // 中心频率 40kHz
+volatile float32_t g_fsw_delta = 20000.0f;     // 频率变化量 ±20kHz
+
+// 三相相位偏移 (120°)
+#define PHASE_OFFSET_A  0.0f
+#define PHASE_OFFSET_B  120.0f
+#define PHASE_OFFSET_C  240.0f
+
+// 输出电压控制 (0~1 对应 0~100% 输出)
+volatile float32_t g_voltage_ref = 0.8f;    // 目标电压比例
+volatile float32_t g_voltage_kp = 0.1f;     // PI比例系数
+volatile float32_t g_voltage_ki = 0.01f;    // PI积分系数
+volatile float32_t g_voltage_integral = 0.0f; // PI积分项
+volatile float32_t g_voltage_output = 0.8f; // PI输出 (调制深度)
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -115,6 +126,20 @@ int main(void)
   MX_TIM16_Init();
   /* USER CODE BEGIN 2 */
 
+  // A相 - TIM1 CH1
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
+  
+  // B相 - TIM15 CH1
+  HAL_TIM_PWM_Start(&htim15, TIM_CHANNEL_1);
+  HAL_TIMEx_PWMN_Start(&htim15, TIM_CHANNEL_1);
+  
+  // C相 - TIM16 CH1
+  HAL_TIM_PWM_Start(&htim16, TIM_CHANNEL_1);
+  HAL_TIMEx_PWMN_Start(&htim16, TIM_CHANNEL_1);
+  
+  // 控制中断
+  HAL_TIM_Base_Start_IT(&htim7);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -351,7 +376,7 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
+  sConfigOC.Pulse = 1000;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
@@ -361,6 +386,7 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  sConfigOC.Pulse = 0;
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
@@ -675,7 +701,24 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-//时钟7的中断，20khz
+
+// 计算单相TCM ZVS参数的辅助函数
+static void calc_tcm_phase(float32_t phase_deg, uint32_t *arr_out, uint32_t *ccr_out)
+{
+    float32_t sin_val;
+    arm_sin_cos_f32(phase_deg, &sin_val, NULL);
+    
+    // 调制正弦波
+    float32_t modulated_sin = sin_val * g_voltage_output;
+    float32_t f_sw = g_fsw_center + g_fsw_delta * modulated_sin;
+    float32_t t_sw = 1.0f / f_sw;
+    
+    // ARR值 (80MHz时钟)
+    *arr_out = (uint32_t)(t_sw * 80000000.0f) - 1;
+    *ccr_out = *arr_out / 2;  // 50%占空比
+}
+
+// 时钟7的中断，20kHz
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM7)
@@ -687,32 +730,26 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
       g_phase_deg -= 360.0f;
     }
 
-    // 正弦调制
-    float32_t sin_val;
-    arm_sin_cos_f32(g_phase_deg, &sin_val, NULL);
-
-    // TCM ZVS: 开关周期随正弦变化
-    // |sin| 大 → 电流大 → 开关周期小 (频率高)
-    // |sin| 小 → 电流小 → 开关周期大 (频率低)
-    float32_t abs_sin = (sin_val >= 0) ? sin_val : -sin_val;
-    // 计算开关周期: Tsw = Tsw_max - (Tsw_max - Tsw_min) * |sin| * mod_index
-    float32_t t_sw = g_tsw_max - (g_tsw_max - g_tsw_min) * abs_sin * g_mod_index;
-
-    // 限幅
-    if (t_sw < g_tsw_min) t_sw = g_tsw_min;
-    if (t_sw > g_tsw_max) t_sw = g_tsw_max;
-
-    // 转换为ARR值 (80MHz时钟)
-    // ARR = Tsw * 80MHz - 1
-    uint32_t arr = (uint32_t)(t_sw * 80000000.0f) - 1;
-
-    // 改变TIM1周期（频率）
-    __HAL_TIM_SET_AUTORELOAD(&htim1, arr);
-
-    // TCM通常用50%占空比
-    uint32_t ccr = arr / 2;
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ccr);
-
+    // 三相TCM ZVS控制 - 三个独立定时器
+    // 每相相位差120°，独立频率控制
+    uint32_t arr_a, ccr_a;
+    uint32_t arr_b, ccr_b;
+    uint32_t arr_c, ccr_c;
+    
+    // A相 (0°) - TIM1
+    calc_tcm_phase(g_phase_deg + PHASE_OFFSET_A, &arr_a, &ccr_a);
+    __HAL_TIM_SET_AUTORELOAD(&htim1, arr_a);
+    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, ccr_a);
+    
+    // B相 (120°) - TIM15
+    calc_tcm_phase(g_phase_deg + PHASE_OFFSET_B, &arr_b, &ccr_b);
+    __HAL_TIM_SET_AUTORELOAD(&htim15, arr_b);
+    __HAL_TIM_SET_COMPARE(&htim15, TIM_CHANNEL_1, ccr_b);
+    
+    // C相 (240°) - TIM16
+    calc_tcm_phase(g_phase_deg + PHASE_OFFSET_C, &arr_c, &ccr_c);
+    __HAL_TIM_SET_AUTORELOAD(&htim16, arr_c);
+    __HAL_TIM_SET_COMPARE(&htim16, TIM_CHANNEL_1, ccr_c);
   }
 }
 /* USER CODE END 4 */
