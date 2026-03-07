@@ -37,7 +37,8 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-
+volatile float32_t g_out_freq_hz = 50.0f;   // 输出频率 50Hz
+volatile float32_t g_mod_index = 0.8f;      // 调制指数
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -676,7 +677,80 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM7)
   {
-    // 你的中断代码写在这里
+    //  你的中断代码写在这里
+    // TIM1有三个正好用于DPWM三相电
+        const float32_t t_s = 1.0f / 20000.0f; // 20 kHz
+        static volatile float32_t g_phase_deg = 0.0f;
+        g_phase_deg += g_out_freq_hz * 360.0f * t_s;
+        if (g_phase_deg >= 360.0f) {
+          g_phase_deg -= 360.0f;
+        }
+        float32_t sin_a, cos_a;
+        arm_sin_cos_f32(g_phase_deg, &sin_a, &cos_a);
+        const float32_t SQRT3_OVER_2 = 0.86602540378f;
+        float32_t sin_b = -0.5f * sin_a + SQRT3_OVER_2 * cos_a;
+        float32_t sin_c = -0.5f * sin_a - SQRT3_OVER_2 * cos_a;
+        float32_t va = g_mod_index * sin_a;
+        float32_t vb = g_mod_index * sin_b;
+        float32_t vc = g_mod_index * sin_c;
+        float32_t vmax = va;
+        if (vb > vmax) vmax = vb;
+        if (vc > vmax) vmax = vc;
+        float32_t vmin = va;
+        if (vb < vmin) vmin = vb;
+        if (vc < vmin) vmin = vc;
+        float32_t v0;
+        if ((vmax + vmin) > 0.0f) {
+            v0 = vmax - 1.0f;
+        } else {
+            v0 = vmin + 1.0f;
+        }
+        va = 0.5f * (va - v0 + 1.0f);
+        vb = 0.5f * (vb - v0 + 1.0f);
+        vc = 0.5f * (vc - v0 + 1.0f);
+        uint32_t period1 = __HAL_TIM_GET_AUTORELOAD(&htim1);
+        uint32_t duty_a = (uint32_t)(va * (float32_t)period1);
+        uint32_t duty_b = (uint32_t)(vb * (float32_t)period1);
+        uint32_t duty_c = (uint32_t)(vc * (float32_t)period1);
+        uint32_t floor = 0;
+        uint32_t ceil = period1;
+        if (duty_a < floor) duty_a = floor;
+        if (duty_b < floor) duty_b = floor;
+        if (duty_c < floor) duty_c = floor;
+        if (duty_a > ceil) duty_a = ceil;
+        if (duty_b > ceil) duty_b = ceil;
+        if (duty_c > ceil) duty_c = ceil;
+         uint32_t ccmr1 = htim1.Instance->CCMR1;
+         uint32_t ccmr2 = htim1.Instance->CCMR2;
+         ccmr1 &= ~TIM_CCMR1_OC1M;
+         if (duty_a >= ceil) {
+             ccmr1 |= TIM_OCMODE_FORCED_ACTIVE;
+         } else if (duty_a <= floor) {
+             ccmr1 |= TIM_OCMODE_FORCED_INACTIVE;
+         } else {
+             ccmr1 |= TIM_OCMODE_PWM1;
+             htim1.Instance->CCR1 = duty_a;
+         }
+         ccmr1 &= ~TIM_CCMR1_OC2M; // Clear OC2M
+         if (duty_b >= ceil) {
+             ccmr1 |= (TIM_OCMODE_FORCED_ACTIVE << 8);
+         } else if (duty_b <= floor) {
+             ccmr1 |= (TIM_OCMODE_FORCED_INACTIVE << 8);
+         } else {
+             ccmr1 |= (TIM_OCMODE_PWM1 << 8);
+             htim1.Instance->CCR2 = duty_b;
+         }
+         ccmr2 &= ~TIM_CCMR2_OC3M; // Clear OC3M
+         if (duty_c >= ceil) {
+             ccmr2 |= TIM_OCMODE_FORCED_ACTIVE;
+         } else if (duty_c <= floor) {
+             ccmr2 |= TIM_OCMODE_FORCED_INACTIVE;
+         } else {
+             ccmr2 |= TIM_OCMODE_PWM1;
+             htim1.Instance->CCR3 = duty_c;
+         }
+         htim1.Instance->CCMR1 = ccmr1;
+         htim1.Instance->CCMR2 = ccmr2;
   }
 }
 /* USER CODE END 4 */
