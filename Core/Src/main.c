@@ -36,12 +36,13 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-// ========== TCM ZVS 参数 ==========
+// ========== TCM ZVS 全桥逆变器参数 ==========
+// 正半周用对角1(AH+BL)，负半周用对角2(AL+BH)
 volatile float32_t g_out_freq_hz = 50.0f;      // 输出频率 50Hz
-volatile float32_t g_fsw_center = 5000.0f;     // 中心频率 5kHz
-volatile float32_t g_fsw_delta = 3000.0f;      // 频率变化量 ±3kHz
+volatile float32_t g_fsw_center = 10000.0f;   // 中心频率 10kHz
+volatile float32_t g_fsw_delta = 10000.0f;     // 频率变化量 10kHz
 volatile float32_t g_voltage_output = 0.8f;    // 电压控制 0~1
-volatile float32_t g_duty_cycle = 0.5f;        // 占空比 0~1
+volatile float32_t g_duty_cycle = 0.8f;        // 基础占空比 30%
 
 // ========== Sin/Cos查表 (360点，每度一个值) ==========
 #define SIN_TABLE_SIZE 360
@@ -86,50 +87,35 @@ static const float32_t sin_table[360] = {
 // cos表 = sin表偏移90度
 #define cos_table(idx) sin_table[((idx) + 90) % 360]
 
-// ========== 虚拟三相时钟 ==========
-// TIM1中断频率 = 100kHz（ARR=1000-1, 100MHz/1000=100kHz）
-#define TIM1_IRQ_FREQ   100000.0f
+// ========== 单相+180°互补时钟 ==========
+// TIM1中断频率 = 500kHz（ARR=200-1, 100MHz/200=500kHz）
+#define TIM1_IRQ_FREQ   500000.0f
 
-// 三相虚拟计数器
-volatile uint16_t g_phase_cnt_a = 0;
-volatile uint16_t g_phase_cnt_b = 0;
-volatile uint16_t g_phase_cnt_c = 0;
+// 计数器和状态
+volatile uint16_t g_phase_cnt = 0;
+volatile uint16_t g_period = 40;
+volatile uint16_t g_high_cnt = 12;
 
-// 三相目标周期计数值
-volatile uint16_t g_period_a = 40;
-volatile uint16_t g_period_b = 40;
-volatile uint16_t g_period_c = 40;
+// 当前使用的对角 (0=都不, 1=对角1/正半周, 2=对角2/负半周)
+volatile uint8_t g_active_diag = 1;
 
-// 三相HIGH时间计数
-volatile uint16_t g_high_cnt_a = 20;
-volatile uint16_t g_high_cnt_b = 20;
-volatile uint16_t g_high_cnt_c = 20;
-
-// 三相当前输出状态
+// 输出状态
 #define STATE_HIGH      0
 #define STATE_LOW       2
-volatile uint8_t g_state_a = STATE_HIGH;
-volatile uint8_t g_state_b = STATE_HIGH;
-volatile uint8_t g_state_c = STATE_HIGH;
+volatile uint8_t g_state = STATE_HIGH;
 
-// ========== 三相互补PWM GPIO引脚定义 ==========
+// ========== 单相互补PWM GPIO引脚定义 ==========
 // A相: 高侧PA8, 低侧PB13
 #define GPIO_AH_PORT    GPIOA
 #define GPIO_AH_PIN     GPIO_PIN_8
 #define GPIO_AL_PORT    GPIOB
 #define GPIO_AL_PIN     GPIO_PIN_13
 
-// B相: 高侧PA9, 低侧PB14
+// B相(180°互补): 高侧PA9, 低侧PB14
 #define GPIO_BH_PORT    GPIOA
 #define GPIO_BH_PIN     GPIO_PIN_9
 #define GPIO_BL_PORT    GPIOB
 #define GPIO_BL_PIN     GPIO_PIN_14
-
-// C相: 高侧PA10, 低侧PB1
-#define GPIO_CH_PORT    GPIOA
-#define GPIO_CH_PIN     GPIO_PIN_10
-#define GPIO_CL_PORT    GPIOB
-#define GPIO_CL_PIN     GPIO_PIN_1
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -401,7 +387,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 1000-1;
+  htim1.Init.Period = 200-1;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -445,7 +431,7 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 0;
+  htim7.Init.Prescaler = 10-1;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim7.Init.Period = 10000-1;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -460,7 +446,7 @@ static void MX_TIM7_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM7_Init 2 */
-  // TIM7 = 10kHz (ARR=10000-1, 100MHz/10000=10kHz)
+  // TIM7 = 1kHz (ARR=100000-1, 100MHz/100000=1kHz)
   /* USER CODE END TIM7_Init 2 */
 
 }
@@ -483,23 +469,23 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1|GPIO_PIN_13|GPIO_PIN_14, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13|GPIO_PIN_14, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8|GPIO_PIN_9, GPIO_PIN_RESET);
 
-  /*Configure GPIO pins : PB1 PB13 PB14 */
-  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_13|GPIO_PIN_14;
+  /*Configure GPIO pins : PB13 PB14 */
+  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_14;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PA8 PA9 PA10 */
-  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10;
+  /*Configure GPIO pins : PA8 PA9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
@@ -509,234 +495,77 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
-// TIM1 200kHz中断 - 汇编优化版本，最小化中断延迟
+// TIM1 500kHz中断 - C语言版本
+// TCM ZVS全桥逆变器: 正半周用对角1(AH+BL)，负半周用对角2(AL+BH)
 void TIM1_Update_Handler(void)
 {
-    __asm volatile (
-        // ========== A相处理 ==========
-        "ldr r0, =g_phase_cnt_a \n\t"
-        "ldr r1, =g_period_a \n\t"
-        "ldr r2, =g_high_cnt_a \n\t"
-        "ldr r3, =g_state_a \n\t"
+    g_phase_cnt++;
+    
+    if (g_phase_cnt >= g_period) {
+        // 周期结束，复位到HIGH
+        g_phase_cnt = 0;
+        g_state = STATE_HIGH;
         
-        "ldrh r4, [r0] \n\t"         // r4 = g_phase_cnt_a
-        "add r4, r4, #1 \n\t"        // g_phase_cnt_a++
-        "strh r4, [r0] \n\t"         // 保存
-        
-        "ldrh r5, [r1] \n\t"         // r5 = g_period_a
-        "cmp r4, r5 \n\t"            // if (cnt >= period)
-        "blt a_check_high \n\t"
-        
-        // A相复位到HIGH
-        "mov r4, #0 \n\t"
-        "strh r4, [r0] \n\t"         // g_phase_cnt_a = 0
-        "mov r6, #0 \n\t"
-        "strb r6, [r3] \n\t"         // g_state_a = STATE_HIGH
-        
-        // GPIO: PA8=1, PB13=0
-        "ldr r7, =0x48000018 \n\t"   // GPIOA BSRR (基地址0x48000000)
-        "ldr r6, =0x00000100 \n\t"   // PA8 set
-        "str r6, [r7] \n\t"
-        "ldr r7, =0x48000428 \n\t"   // GPIOB BRR
-        "ldr r6, =0x2000 \n\t"       // PB13 reset
-        "str r6, [r7] \n\t"
-        "b b_phase \n\t"
-        
-        "a_check_high: \n\t"
-        "ldrh r5, [r2] \n\t"         // r5 = g_high_cnt_a
-        "cmp r4, r5 \n\t"            // if (cnt >= high_cnt)
-        "blt b_phase \n\t"
-        "ldrb r6, [r3] \n\t"         // r6 = g_state_a
-        "cmp r6, #0 \n\t"            // if (state == STATE_HIGH)
-        "bne b_phase \n\t"
-        
-        // A相切换到LOW
-        "mov r6, #2 \n\t"
-        "strb r6, [r3] \n\t"         // g_state_a = STATE_LOW
-        "ldr r7, =0x48000028 \n\t"   // GPIOA BRR (基地址0x48000000)
-        "ldr r6, =0x0100 \n\t"       // PA8 reset
-        "str r6, [r7] \n\t"
-        "ldr r7, =0x48000418 \n\t"   // GPIOB BSRR
-        "ldr r6, =0x2000 \n\t"       // PB13 set
-        "str r6, [r7] \n\t"
-        
-        // ========== B相处理 ==========
-        "b_phase: \n\t"
-        "ldr r0, =g_phase_cnt_b \n\t"
-        "ldr r1, =g_period_b \n\t"
-        "ldr r2, =g_high_cnt_b \n\t"
-        "ldr r3, =g_state_b \n\t"
-        
-        "ldrh r4, [r0] \n\t"
-        "add r4, r4, #1 \n\t"
-        "strh r4, [r0] \n\t"
-        
-        "ldrh r5, [r1] \n\t"
-        "cmp r4, r5 \n\t"
-        "blt b_check_high \n\t"
-        
-        // B相复位到HIGH
-        "mov r4, #0 \n\t"
-        "strh r4, [r0] \n\t"
-        "mov r6, #0 \n\t"
-        "strb r6, [r3] \n\t"
-        
-        // GPIO: PA9=1, PB14=0
-        "ldr r7, =0x48000018 \n\t"   // GPIOA BSRR (基地址0x48000000)
-        "ldr r6, =0x00000200 \n\t"   // PA9 set
-        "str r6, [r7] \n\t"
-        "ldr r7, =0x48000428 \n\t"
-        "ldr r6, =0x4000 \n\t"       // PB14 reset
-        "str r6, [r7] \n\t"
-        "b c_phase \n\t"
-        
-        "b_check_high: \n\t"
-        "ldrh r5, [r2] \n\t"
-        "cmp r4, r5 \n\t"
-        "blt c_phase \n\t"
-        "ldrb r6, [r3] \n\t"
-        "cmp r6, #0 \n\t"
-        "bne c_phase \n\t"
-        
-        // B相切换到LOW
-        "mov r6, #2 \n\t"
-        "strb r6, [r3] \n\t"
-        "ldr r7, =0x48000028 \n\t"   // GPIOA BRR (基地址0x48000000)
-        "ldr r6, =0x0200 \n\t"       // PA9 reset
-        "str r6, [r7] \n\t"
-        "ldr r7, =0x48000418 \n\t"
-        "ldr r6, =0x4000 \n\t"       // PB14 set
-        "str r6, [r7] \n\t"
-        
-        // ========== C相处理 ==========
-        "c_phase: \n\t"
-        "ldr r0, =g_phase_cnt_c \n\t"
-        "ldr r1, =g_period_c \n\t"
-        "ldr r2, =g_high_cnt_c \n\t"
-        "ldr r3, =g_state_c \n\t"
-        
-        "ldrh r4, [r0] \n\t"
-        "add r4, r4, #1 \n\t"
-        "strh r4, [r0] \n\t"
-        
-        "ldrh r5, [r1] \n\t"
-        "cmp r4, r5 \n\t"
-        "blt c_check_high \n\t"
-        
-        // C相复位到HIGH
-        "mov r4, #0 \n\t"
-        "strh r4, [r0] \n\t"
-        "mov r6, #0 \n\t"
-        "strb r6, [r3] \n\t"
-        
-        // GPIO: PA10=1, PB1=0
-        "ldr r7, =0x48000018 \n\t"   // GPIOA BSRR (基地址0x48000000)
-        "ldr r6, =0x00000400 \n\t"   // PA10 set
-        "str r6, [r7] \n\t"
-        "ldr r7, =0x48000428 \n\t"
-        "ldr r6, =0x0002 \n\t"       // PB1 reset
-        "str r6, [r7] \n\t"
-        "b done_asm \n\t"
-        
-        "c_check_high: \n\t"
-        "ldrh r5, [r2] \n\t"
-        "cmp r4, r5 \n\t"
-        "blt done_asm \n\t"
-        "ldrb r6, [r3] \n\t"
-        "cmp r6, #0 \n\t"
-        "bne done_asm \n\t"
-        
-        // C相切换到LOW
-        "mov r6, #2 \n\t"
-        "strb r6, [r3] \n\t"
-        "ldr r7, =0x48000028 \n\t"   // GPIOA BRR (基地址0x48000000)
-        "ldr r6, =0x0400 \n\t"       // PA10 reset
-        "str r6, [r7] \n\t"
-        "ldr r7, =0x48000418 \n\t"
-        "ldr r6, =0x0002 \n\t"       // PB1 set
-        "str r6, [r7] \n\t"
-        
-        "done_asm: \n\t"
-        : // 无输出
-        : // 无输入
-        : "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "memory", "cc"
-    );
+        // 根据当前对角设置GPIO
+        if (g_active_diag == 1) {
+            // 对角1: AH=1, BL=1, AL=0, BH=0 (正半周)
+            GPIOA->BSRR = GPIO_PIN_8;   // AH on
+            GPIOB->BSRR = GPIO_PIN_14;  // BL on
+            GPIOA->BRR = GPIO_PIN_9;    // BH off
+            GPIOB->BRR = GPIO_PIN_13;   // AL off
+        } else if (g_active_diag == 2) {
+            // 对角2: AL=1, BH=1, AH=0, BL=0 (负半周)
+            GPIOB->BSRR = GPIO_PIN_13;  // AL on
+            GPIOA->BSRR = GPIO_PIN_9;   // BH on
+            GPIOA->BRR = GPIO_PIN_8;    // AH off
+            GPIOB->BRR = GPIO_PIN_14;   // BL off
+        } else {
+            // 零交叉，都关闭
+            GPIOA->BRR = GPIO_PIN_8 | GPIO_PIN_9;
+            GPIOB->BRR = GPIO_PIN_13 | GPIO_PIN_14;
+        }
+    } else if (g_phase_cnt >= g_high_cnt && g_state == STATE_HIGH) {
+        // 切换到LOW（续流）- 关断所有管子，通过体二极管续流实现ZVS
+        g_state = STATE_LOW;
+        GPIOA->BRR = GPIO_PIN_8 | GPIO_PIN_9;   // AH, BH off
+        GPIOB->BRR = GPIO_PIN_13 | GPIO_PIN_14; // AL, BL off
+    }
 }
 
-// TIM7 10kHz中断 - 计算三相参数（使用查表法加速）
+// TIM7 1kHz中断 - 计算TCM ZVS参数
+// 正半周用对角1(AH+BL)，负半周用对角2(AL+BH)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-  static uint16_t phase_idx = 0;  // 查表索引 0-359
+  static uint16_t phase_idx = 0;     // 查表索引 0-359
+  static float phase_accum = 0.0f;  // 相位累加器（保存小数精度）
   
   if (htim->Instance == TIM7)
   {
-    // 更新相位索引 (50Hz / 10000Hz * 360 = 1.8度/次)
-    phase_idx += (uint16_t)(g_out_freq_hz * 360.0f / 10000.0f);
-    if (phase_idx >= 360) {
-      phase_idx -= 360;
+    // 更新相位索引（使用累加器保证精度）
+    phase_accum += g_out_freq_hz * 360.0f / 1000.0f;
+    if (phase_accum >= 360.0f) {
+      phase_accum -= 360.0f;
+    }
+    phase_idx = (uint16_t)phase_accum;
+    
+    // 查表获取sin值
+    float32_t sin_val = sin_table[phase_idx];
+    
+    // 选择对角: sin>=0用对角1(正半周), sin<0用对角2(负半周)
+    if (sin_val >= 0) {
+      g_active_diag = 1;  // AH+BL
+    } else {
+      g_active_diag = 2;  // AL+BH
     }
     
-    // 查表获取sin/cos值（比arm_sin_cos_f32快10-100倍）
-    float32_t sin_a = sin_table[phase_idx];
-    float32_t cos_a = sin_table[(phase_idx + 90) % 360];
-    
-    // 三相120度偏移
-    float32_t sin_b = -0.5f * sin_a + 0.866025404f * cos_a;
-    float32_t sin_c = -0.5f * sin_a - 0.866025404f * cos_a;
-    
-    float32_t f_a = g_fsw_center + g_fsw_delta * sin_a * g_voltage_output;
-    float32_t f_b = g_fsw_center + g_fsw_delta * sin_b * g_voltage_output;
-    float32_t f_c = g_fsw_center + g_fsw_delta * sin_c * g_voltage_output;
+    // TCM ZVS: 频率随sin变化
+    float32_t abs_sin = (sin_val >= 0) ? sin_val : -sin_val;
+    float32_t f_sw = g_fsw_center - g_fsw_delta * abs_sin * g_voltage_output;
 
-    uint16_t new_period_a = (uint16_t)(TIM1_IRQ_FREQ / f_a);
-    uint16_t new_period_b = (uint16_t)(TIM1_IRQ_FREQ / f_b);
-    uint16_t new_period_c = (uint16_t)(TIM1_IRQ_FREQ / f_c);
+    g_period = (uint16_t)(TIM1_IRQ_FREQ / f_sw);
     
-    uint16_t new_high_a = (uint16_t)(new_period_a * g_duty_cycle);
-    uint16_t new_high_b = (uint16_t)(new_period_b * g_duty_cycle);
-    uint16_t new_high_c = (uint16_t)(new_period_c * g_duty_cycle);
-    
-    // A相同步
-    if (g_phase_cnt_a >= new_period_a) {
-        g_phase_cnt_a = 0;
-        g_state_a = STATE_HIGH;
-        GPIO_AH_PORT->BSRR = GPIO_AH_PIN;
-        GPIO_AL_PORT->BRR  = GPIO_AL_PIN;
-    } else if (g_state_a == STATE_HIGH && g_phase_cnt_a >= new_high_a) {
-        GPIO_AH_PORT->BRR  = GPIO_AH_PIN;
-        GPIO_AL_PORT->BSRR = GPIO_AL_PIN;
-        g_state_a = STATE_LOW;
-    }
-    g_period_a = new_period_a;
-    g_high_cnt_a = new_high_a;
-    
-    // B相同步
-    if (g_phase_cnt_b >= new_period_b) {
-        g_phase_cnt_b = 0;
-        g_state_b = STATE_HIGH;
-        GPIO_BH_PORT->BSRR = GPIO_BH_PIN;
-        GPIO_BL_PORT->BRR  = GPIO_BL_PIN;
-    } else if (g_state_b == STATE_HIGH && g_phase_cnt_b >= new_high_b) {
-        GPIO_BH_PORT->BRR  = GPIO_BH_PIN;
-        GPIO_BL_PORT->BSRR = GPIO_BL_PIN;
-        g_state_b = STATE_LOW;
-    }
-    g_period_b = new_period_b;
-    g_high_cnt_b = new_high_b;
-    
-    // C相同步
-    if (g_phase_cnt_c >= new_period_c) {
-        g_phase_cnt_c = 0;
-        g_state_c = STATE_HIGH;
-        GPIO_CH_PORT->BSRR = GPIO_CH_PIN;
-        GPIO_CL_PORT->BRR  = GPIO_CL_PIN;
-    } else if (g_state_c == STATE_HIGH && g_phase_cnt_c >= new_high_c) {
-        GPIO_CH_PORT->BRR  = GPIO_CH_PIN;
-        GPIO_CL_PORT->BSRR = GPIO_CL_PIN;
-        g_state_c = STATE_LOW;
-    }
-    g_period_c = new_period_c;
-    g_high_cnt_c = new_high_c;
+    // ZVS固定占空比
+    g_high_cnt = (uint16_t)(g_period * g_duty_cycle);
   }
 }
 /* USER CODE END 4 */
