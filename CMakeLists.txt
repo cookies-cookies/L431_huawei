@@ -82,10 +82,8 @@ target_include_directories(CMSIS_DSP PRIVATE
 # Remove wrong libob.a library dependency when using cpp files
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 
-# Add linked libraries
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
-    stm32cubemx
+# Add linked libraries (使用plain签名以匹配stm32cubemx)
+target_link_libraries(${CMAKE_PROJECT_NAME}
     CMSIS_DSP
-
-    # Add user defined libraries
+    # 注意: stm32cubemx已经在cmake/stm32cubemx/CMakeLists.txt中链接
 )

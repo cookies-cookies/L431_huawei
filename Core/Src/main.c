@@ -11,7 +11,7 @@
   *
   * This software is licensed under terms that can be found in the LICENSE file
   * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
+  * If no LICENSE file accompanies this software, it is provided AS-IS.
   *
   ******************************************************************************
   */
@@ -38,67 +38,105 @@
 /* USER CODE BEGIN PM */
 // ========== TCM ZVS 参数 ==========
 volatile float32_t g_out_freq_hz = 50.0f;      // 输出频率 50Hz
-volatile float32_t g_fsw_center = 40000.0f;    // 中心频率 40kHz
-volatile float32_t g_fsw_delta = 20000.0f;     // 频率变化量 ±20kHz
+volatile float32_t g_fsw_center = 5000.0f;     // 中心频率 5kHz
+volatile float32_t g_fsw_delta = 3000.0f;      // 频率变化量 ±3kHz
 volatile float32_t g_voltage_output = 0.8f;    // 电压控制 0~1
+volatile float32_t g_duty_cycle = 0.5f;        // 占空比 0~1
+
+// ========== Sin/Cos查表 (360点，每度一个值) ==========
+#define SIN_TABLE_SIZE 360
+static const float32_t sin_table[360] = {
+    0.0000f, 0.0175f, 0.0349f, 0.0523f, 0.0698f, 0.0872f, 0.1045f, 0.1219f, 0.1392f, 0.1564f,
+    0.1736f, 0.1908f, 0.2079f, 0.2250f, 0.2419f, 0.2588f, 0.2756f, 0.2924f, 0.3090f, 0.3256f,
+    0.3420f, 0.3584f, 0.3746f, 0.3907f, 0.4067f, 0.4226f, 0.4384f, 0.4540f, 0.4695f, 0.4848f,
+    0.5000f, 0.5150f, 0.5299f, 0.5446f, 0.5592f, 0.5736f, 0.5878f, 0.6018f, 0.6157f, 0.6293f,
+    0.6428f, 0.6561f, 0.6691f, 0.6820f, 0.6947f, 0.7071f, 0.7193f, 0.7314f, 0.7431f, 0.7547f,
+    0.7660f, 0.7771f, 0.7880f, 0.7986f, 0.8090f, 0.8192f, 0.8290f, 0.8387f, 0.8480f, 0.8572f,
+    0.8660f, 0.8746f, 0.8829f, 0.8910f, 0.8988f, 0.9063f, 0.9135f, 0.9205f, 0.9272f, 0.9336f,
+    0.9397f, 0.9455f, 0.9511f, 0.9563f, 0.9613f, 0.9659f, 0.9703f, 0.9744f, 0.9781f, 0.9816f,
+    0.9848f, 0.9877f, 0.9903f, 0.9925f, 0.9945f, 0.9962f, 0.9976f, 0.9986f, 0.9994f, 0.9998f,
+    1.0000f, 0.9998f, 0.9994f, 0.9986f, 0.9976f, 0.9962f, 0.9945f, 0.9925f, 0.9903f, 0.9877f,
+    0.9848f, 0.9816f, 0.9781f, 0.9744f, 0.9703f, 0.9659f, 0.9613f, 0.9563f, 0.9511f, 0.9455f,
+    0.9397f, 0.9336f, 0.9272f, 0.9205f, 0.9135f, 0.9063f, 0.8988f, 0.8910f, 0.8829f, 0.8746f,
+    0.8660f, 0.8572f, 0.8480f, 0.8387f, 0.8290f, 0.8192f, 0.8090f, 0.7986f, 0.7880f, 0.7771f,
+    0.7660f, 0.7547f, 0.7431f, 0.7314f, 0.7193f, 0.7071f, 0.6947f, 0.6820f, 0.6691f, 0.6561f,
+    0.6428f, 0.6293f, 0.6157f, 0.6018f, 0.5878f, 0.5736f, 0.5592f, 0.5446f, 0.5299f, 0.5150f,
+    0.5000f, 0.4848f, 0.4695f, 0.4540f, 0.4384f, 0.4226f, 0.4067f, 0.3907f, 0.3746f, 0.3584f,
+    0.3420f, 0.3256f, 0.3090f, 0.2924f, 0.2756f, 0.2588f, 0.2419f, 0.2250f, 0.2079f, 0.1908f,
+    0.1736f, 0.1564f, 0.1392f, 0.1219f, 0.1045f, 0.0872f, 0.0698f, 0.0523f, 0.0349f, 0.0175f,
+    0.0000f,-0.0175f,-0.0349f,-0.0523f,-0.0698f,-0.0872f,-0.1045f,-0.1219f,-0.1392f,-0.1564f,
+   -0.1736f,-0.1908f,-0.2079f,-0.2250f,-0.2419f,-0.2588f,-0.2756f,-0.2924f,-0.3090f,-0.3256f,
+   -0.3420f,-0.3584f,-0.3746f,-0.3907f,-0.4067f,-0.4226f,-0.4384f,-0.4540f,-0.4695f,-0.4848f,
+   -0.5000f,-0.5150f,-0.5299f,-0.5446f,-0.5592f,-0.5736f,-0.5878f,-0.6018f,-0.6157f,-0.6293f,
+   -0.6428f,-0.6561f,-0.6691f,-0.6820f,-0.6947f,-0.7071f,-0.7193f,-0.7314f,-0.7431f,-0.7547f,
+   -0.7660f,-0.7771f,-0.7880f,-0.7986f,-0.8090f,-0.8192f,-0.8290f,-0.8387f,-0.8480f,-0.8572f,
+   -0.8660f,-0.8746f,-0.8829f,-0.8910f,-0.8988f,-0.9063f,-0.9135f,-0.9205f,-0.9272f,-0.9336f,
+   -0.9397f,-0.9455f,-0.9511f,-0.9563f,-0.9613f,-0.9659f,-0.9703f,-0.9744f,-0.9781f,-0.9816f,
+   -0.9848f,-0.9877f,-0.9903f,-0.9925f,-0.9945f,-0.9962f,-0.9976f,-0.9986f,-0.9994f,-0.9998f,
+   -1.0000f,-0.9998f,-0.9994f,-0.9986f,-0.9976f,-0.9962f,-0.9945f,-0.9925f,-0.9903f,-0.9877f,
+   -0.9848f,-0.9816f,-0.9781f,-0.9744f,-0.9703f,-0.9659f,-0.9613f,-0.9563f,-0.9511f,-0.9455f,
+   -0.9397f,-0.9336f,-0.9272f,-0.9205f,-0.9135f,-0.9063f,-0.8988f,-0.8910f,-0.8829f,-0.8746f,
+   -0.8660f,-0.8572f,-0.8480f,-0.8387f,-0.8290f,-0.8192f,-0.8090f,-0.7986f,-0.7880f,-0.7771f,
+   -0.7660f,-0.7547f,-0.7431f,-0.7314f,-0.7193f,-0.7071f,-0.6947f,-0.6820f,-0.6691f,-0.6561f,
+   -0.6428f,-0.6293f,-0.6157f,-0.6018f,-0.5878f,-0.5736f,-0.5592f,-0.5446f,-0.5299f,-0.5150f,
+   -0.5000f,-0.4848f,-0.4695f,-0.4540f,-0.4384f,-0.4226f,-0.4067f,-0.3907f,-0.3746f,-0.3584f,
+   -0.3420f,-0.3256f,-0.3090f,-0.2924f,-0.2756f,-0.2588f,-0.2419f,-0.2250f,-0.2079f,-0.1908f,
+   -0.1736f,-0.1564f,-0.1392f,-0.1219f,-0.1045f,-0.0872f,-0.0698f,-0.0523f,-0.0349f,-0.0175f
+};
+// cos表 = sin表偏移90度
+#define cos_table(idx) sin_table[((idx) + 90) % 360]
 
 // ========== 虚拟三相时钟 ==========
-// TIM1中断频率 = 200kHz（支持5~35kHz PWM）
-// 每相独立计数器，实现120°相位差
-#define TIM1_IRQ_FREQ   200000.0f   // TIM1中断频率 200kHz
+// TIM1中断频率 = 100kHz（ARR=1000-1, 100MHz/1000=100kHz）
+#define TIM1_IRQ_FREQ   100000.0f
 
-// 三相虚拟计数器（0~360度循环）
-volatile uint16_t g_phase_cnt_a = 0;    // A相计数器
-volatile uint16_t g_phase_cnt_b = 0;    // B相计数器  
-volatile uint16_t g_phase_cnt_c = 0;    // C相计数器
+// 三相虚拟计数器
+volatile uint16_t g_phase_cnt_a = 0;
+volatile uint16_t g_phase_cnt_b = 0;
+volatile uint16_t g_phase_cnt_c = 0;
 
-// 三相目标半周期计数值（由TIM2计算）
-volatile uint16_t g_half_period_a = 100;   // A相半周期 (200kHz/1kHz/2=100)
-volatile uint16_t g_half_period_b = 100;   // B相半周期
-volatile uint16_t g_half_period_c = 100;   // C相半周期
+// 三相目标周期计数值
+volatile uint16_t g_period_a = 40;
+volatile uint16_t g_period_b = 40;
+volatile uint16_t g_period_c = 40;
+
+// 三相HIGH时间计数
+volatile uint16_t g_high_cnt_a = 20;
+volatile uint16_t g_high_cnt_b = 20;
+volatile uint16_t g_high_cnt_c = 20;
 
 // 三相当前输出状态
-volatile uint8_t g_state_a = 0;  // A相状态 0/1
-volatile uint8_t g_state_b = 0;  // B相状态 0/1
-volatile uint8_t g_state_c = 0;  // C相状态 0/1
-
-// 三相死区计数器
-volatile uint8_t g_dead_cnt_a = 0;  // A相死区计数
-volatile uint8_t g_dead_cnt_b = 0;  // B相死区计数
-volatile uint8_t g_dead_cnt_c = 0;  // C相死区计数
+#define STATE_HIGH      0
+#define STATE_LOW       2
+volatile uint8_t g_state_a = STATE_HIGH;
+volatile uint8_t g_state_b = STATE_HIGH;
+volatile uint8_t g_state_c = STATE_HIGH;
 
 // ========== 三相互补PWM GPIO引脚定义 ==========
-// A相: 高侧PA8, 低侧PA7
+// A相: 高侧PA8, 低侧PB13
 #define GPIO_AH_PORT    GPIOA
 #define GPIO_AH_PIN     GPIO_PIN_8
-#define GPIO_AL_PORT    GPIOA
-#define GPIO_AL_PIN     GPIO_PIN_7
+#define GPIO_AL_PORT    GPIOB
+#define GPIO_AL_PIN     GPIO_PIN_13
 
-// B相: 高侧PA9, 低侧PB0
+// B相: 高侧PA9, 低侧PB14
 #define GPIO_BH_PORT    GPIOA
 #define GPIO_BH_PIN     GPIO_PIN_9
 #define GPIO_BL_PORT    GPIOB
-#define GPIO_BL_PIN     GPIO_PIN_0
+#define GPIO_BL_PIN     GPIO_PIN_14
 
 // C相: 高侧PA10, 低侧PB1
 #define GPIO_CH_PORT    GPIOA
 #define GPIO_CH_PIN     GPIO_PIN_10
 #define GPIO_CL_PORT    GPIOB
 #define GPIO_CL_PIN     GPIO_PIN_1
-
-// 死区时间计数 (200kHz中断, 死区约500ns = 0.1个计数，取1个计数)
-#define DEAD_TIME_COUNT 1
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
-DMA_HandleTypeDef hdma_adc1;
 
 TIM_HandleTypeDef htim1;
-TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim7;
-TIM_HandleTypeDef htim15;
-TIM_HandleTypeDef htim16;
 
 /* USER CODE BEGIN PV */
 
@@ -107,13 +145,9 @@ TIM_HandleTypeDef htim16;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM1_Init(void);
-static void MX_TIM2_Init(void);
 static void MX_TIM7_Init(void);
-static void MX_TIM15_Init(void);
-static void MX_TIM16_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -152,29 +186,12 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_ADC1_Init();
   MX_TIM1_Init();
-  MX_TIM2_Init();
   MX_TIM7_Init();
-  MX_TIM15_Init();
-  MX_TIM16_Init();
   /* USER CODE BEGIN 2 */
-
-  // ========== TIM1 高频中断 (200kHz) - GPIO翻转 ==========
-  // ARR = 80MHz / 200kHz - 1 = 399
-  __HAL_TIM_SET_AUTORELOAD(&htim1, 399);
   HAL_TIM_Base_Start_IT(&htim1);
-  
-  // ========== TIM2 计算中断 (20kHz) - 计算三相参数 ==========
-  // ARR = 80MHz / 20kHz - 1 = 3999
-  __HAL_TIM_SET_AUTORELOAD(&htim2, 3999);
-  HAL_TIM_Base_Start_IT(&htim2);
-  
-  // 初始化三相相位差 (120°)
-  // B相初始延迟 1/3 周期，C相初始延迟 2/3 周期
-  g_phase_cnt_b = 33;    // 120° / 360° * 100 ≈ 33
-  g_phase_cnt_c = 67;    // 240° / 360° * 100 ≈ 67
+  HAL_TIM_Base_Start_IT(&htim7);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -214,7 +231,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_MSI;
   RCC_OscInitStruct.PLL.PLLM = 1;
-  RCC_OscInitStruct.PLL.PLLN = 40;
+  RCC_OscInitStruct.PLL.PLLN = 50;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV7;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
   RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
@@ -270,7 +287,7 @@ static void MX_ADC1_Init(void)
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-  hadc1.Init.DMAContinuousRequests = ENABLE;
+  hadc1.Init.DMAContinuousRequests = DISABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
   hadc1.Init.OversamplingMode = ENABLE;
   hadc1.Init.Oversampling.Ratio = ADC_OVERSAMPLING_RATIO_8;
@@ -384,7 +401,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 0;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 400-1;
+  htim1.Init.Period = 1000-1;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
@@ -411,77 +428,6 @@ static void MX_TIM1_Init(void)
 }
 
 /**
-  * @brief TIM2 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM2_Init(void)
-{
-
-  /* USER CODE BEGIN TIM2_Init 0 */
-
-  /* USER CODE END TIM2_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 2000-1;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
-
-  /* USER CODE END TIM2_Init 2 */
-  HAL_TIM_MspPostInit(&htim2);
-
-}
-
-/**
   * @brief TIM7 Initialization Function
   * @param None
   * @retval None
@@ -501,7 +447,7 @@ static void MX_TIM7_Init(void)
   htim7.Instance = TIM7;
   htim7.Init.Prescaler = 0;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 4000-1;
+  htim7.Init.Period = 10000-1;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
   {
@@ -514,161 +460,8 @@ static void MX_TIM7_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN TIM7_Init 2 */
-
+  // TIM7 = 10kHz (ARR=10000-1, 100MHz/10000=10kHz)
   /* USER CODE END TIM7_Init 2 */
-
-}
-
-/**
-  * @brief TIM15 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM15_Init(void)
-{
-
-  /* USER CODE BEGIN TIM15_Init 0 */
-
-  /* USER CODE END TIM15_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
-  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
-
-  /* USER CODE BEGIN TIM15_Init 1 */
-
-  /* USER CODE END TIM15_Init 1 */
-  htim15.Instance = TIM15;
-  htim15.Init.Prescaler = 0;
-  htim15.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim15.Init.Period = 2000-1;
-  htim15.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim15.Init.RepetitionCounter = 0;
-  htim15.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim15) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim15, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim15) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim15, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-  if (HAL_TIM_PWM_ConfigChannel(&htim15, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
-  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
-  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
-  sBreakDeadTimeConfig.DeadTime = 0;
-  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
-  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
-  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
-  if (HAL_TIMEx_ConfigBreakDeadTime(&htim15, &sBreakDeadTimeConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM15_Init 2 */
-
-  /* USER CODE END TIM15_Init 2 */
-  HAL_TIM_MspPostInit(&htim15);
-
-}
-
-/**
-  * @brief TIM16 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM16_Init(void)
-{
-
-  /* USER CODE BEGIN TIM16_Init 0 */
-
-  /* USER CODE END TIM16_Init 0 */
-
-  TIM_OC_InitTypeDef sConfigOC = {0};
-  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
-
-  /* USER CODE BEGIN TIM16_Init 1 */
-
-  /* USER CODE END TIM16_Init 1 */
-  htim16.Instance = TIM16;
-  htim16.Init.Prescaler = 0;
-  htim16.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim16.Init.Period = 2000-1;
-  htim16.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim16.Init.RepetitionCounter = 0;
-  htim16.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim16) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_PWM_Init(&htim16) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  sConfigOC.OCIdleState = TIM_OCIDLESTATE_RESET;
-  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
-  if (HAL_TIM_PWM_ConfigChannel(&htim16, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
-  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
-  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
-  sBreakDeadTimeConfig.DeadTime = 0;
-  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
-  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
-  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
-  if (HAL_TIMEx_ConfigBreakDeadTime(&htim16, &sBreakDeadTimeConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM16_Init 2 */
-
-  /* USER CODE END TIM16_Init 2 */
-  HAL_TIM_MspPostInit(&htim16);
-
-}
-
-/**
-  * Enable DMA controller clock
-  */
-static void MX_DMA_Init(void)
-{
-
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
-
-  /* DMA interrupt init */
-  /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
 
@@ -679,6 +472,7 @@ static void MX_DMA_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -688,216 +482,261 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
-  // ========== 三相互补PWM GPIO初始化 ==========
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
-  
-  // 配置为高速推挽输出
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1|GPIO_PIN_13|GPIO_PIN_14, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : PB1 PB13 PB14 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_13|GPIO_PIN_14;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  
-  // A相: PA8(高侧), PA7(低侧)
-  GPIO_InitStruct.Pin = GPIO_PIN_7 | GPIO_PIN_8;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);  // AL = 0
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);  // AH = 0
-  
-  // B相: PA9(高侧), PB0(低侧)
-  GPIO_InitStruct.Pin = GPIO_PIN_9;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);  // BH = 0
-  
-  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);  // BL = 0
-  
-  // C相: PA10(高侧), PB1(低侧)
-  GPIO_InitStruct.Pin = GPIO_PIN_10;
+
+  /*Configure GPIO pins : PA8 PA9 PA10 */
+  GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_RESET); // CH = 0
-  
-  GPIO_InitStruct.Pin = GPIO_PIN_1;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);  // CL = 0
+
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
 
-// ========== TIM1 高频中断 (200kHz) - GPIO翻转产生三相互补PWM ==========
-// 状态机状态定义
-#define STATE_HIGH      0   // 高侧导通
-#define STATE_DEAD_HL   1   // 死区(高->低)
-#define STATE_LOW       2   // 低侧导通
-#define STATE_DEAD_LH   3   // 死区(低->高)
-
-void TIM1_UP_TIM16_IRQHandler(void)  // TIM1更新中断
+// TIM1 200kHz中断 - 汇编优化版本，最小化中断延迟
+void TIM1_Update_Handler(void)
 {
-  if (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_UPDATE))
-  {
-    __HAL_TIM_CLEAR_FLAG(&htim1, TIM_FLAG_UPDATE);
-    
-    // ========== A相处理 ==========
-    g_phase_cnt_a++;
-    if (g_phase_cnt_a >= g_half_period_a) {
-      g_phase_cnt_a = 0;
-      // 状态切换: HIGH -> DEAD_HL -> LOW -> DEAD_LH -> HIGH
-      g_state_a = (g_state_a + 1) & 0x03;  // 0->1->2->3->0 循环
-      
-      switch(g_state_a) {
-        case STATE_HIGH:    // 高侧导通，低侧关断
-          GPIO_AH_PORT->BSRR = GPIO_AH_PIN;          // AH = 1
-          GPIO_AL_PORT->BRR  = GPIO_AL_PIN;          // AL = 0
-          break;
-        case STATE_DEAD_HL: // 死区：两个都关断
-          GPIO_AH_PORT->BRR  = GPIO_AH_PIN;          // AH = 0
-          GPIO_AL_PORT->BRR  = GPIO_AL_PIN;          // AL = 0
-          g_dead_cnt_a = DEAD_TIME_COUNT;
-          break;
-        case STATE_LOW:     // 低侧导通，高侧关断
-          GPIO_AH_PORT->BRR  = GPIO_AH_PIN;          // AH = 0
-          GPIO_AL_PORT->BSRR = GPIO_AL_PIN;          // AL = 1
-          break;
-        case STATE_DEAD_LH: // 死区：两个都关断
-          GPIO_AH_PORT->BRR  = GPIO_AH_PIN;          // AH = 0
-          GPIO_AL_PORT->BRR  = GPIO_AL_PIN;          // AL = 0
-          g_dead_cnt_a = DEAD_TIME_COUNT;
-          break;
-      }
-    }
-    // 死区计数处理
-    if (g_dead_cnt_a > 0) {
-      g_dead_cnt_a--;
-      if (g_dead_cnt_a == 0) {
-        // 死区结束，进入下一状态
-        if (g_state_a == STATE_DEAD_HL) {
-          g_state_a = STATE_LOW;
-          GPIO_AL_PORT->BSRR = GPIO_AL_PIN;          // AL = 1
-        } else if (g_state_a == STATE_DEAD_LH) {
-          g_state_a = STATE_HIGH;
-          GPIO_AH_PORT->BSRR = GPIO_AH_PIN;          // AH = 1
-        }
-      }
-    }
-    
-    // ========== B相处理 (120°相位差) ==========
-    g_phase_cnt_b++;
-    if (g_phase_cnt_b >= g_half_period_b) {
-      g_phase_cnt_b = 0;
-      g_state_b = (g_state_b + 1) & 0x03;
-      
-      switch(g_state_b) {
-        case STATE_HIGH:
-          GPIO_BH_PORT->BSRR = GPIO_BH_PIN;
-          GPIO_BL_PORT->BRR  = GPIO_BL_PIN;
-          break;
-        case STATE_DEAD_HL:
-          GPIO_BH_PORT->BRR  = GPIO_BH_PIN;
-          GPIO_BL_PORT->BRR  = GPIO_BL_PIN;
-          g_dead_cnt_b = DEAD_TIME_COUNT;
-          break;
-        case STATE_LOW:
-          GPIO_BH_PORT->BRR  = GPIO_BH_PIN;
-          GPIO_BL_PORT->BSRR = GPIO_BL_PIN;
-          break;
-        case STATE_DEAD_LH:
-          GPIO_BH_PORT->BRR  = GPIO_BH_PIN;
-          GPIO_BL_PORT->BRR  = GPIO_BL_PIN;
-          g_dead_cnt_b = DEAD_TIME_COUNT;
-          break;
-      }
-    }
-    if (g_dead_cnt_b > 0) {
-      g_dead_cnt_b--;
-      if (g_dead_cnt_b == 0) {
-        if (g_state_b == STATE_DEAD_HL) {
-          g_state_b = STATE_LOW;
-          GPIO_BL_PORT->BSRR = GPIO_BL_PIN;
-        } else if (g_state_b == STATE_DEAD_LH) {
-          g_state_b = STATE_HIGH;
-          GPIO_BH_PORT->BSRR = GPIO_BH_PIN;
-        }
-      }
-    }
-    
-    // ========== C相处理 (240°相位差) ==========
-    g_phase_cnt_c++;
-    if (g_phase_cnt_c >= g_half_period_c) {
-      g_phase_cnt_c = 0;
-      g_state_c = (g_state_c + 1) & 0x03;
-      
-      switch(g_state_c) {
-        case STATE_HIGH:
-          GPIO_CH_PORT->BSRR = GPIO_CH_PIN;
-          GPIO_CL_PORT->BRR  = GPIO_CL_PIN;
-          break;
-        case STATE_DEAD_HL:
-          GPIO_CH_PORT->BRR  = GPIO_CH_PIN;
-          GPIO_CL_PORT->BRR  = GPIO_CL_PIN;
-          g_dead_cnt_c = DEAD_TIME_COUNT;
-          break;
-        case STATE_LOW:
-          GPIO_CH_PORT->BRR  = GPIO_CH_PIN;
-          GPIO_CL_PORT->BSRR = GPIO_CL_PIN;
-          break;
-        case STATE_DEAD_LH:
-          GPIO_CH_PORT->BRR  = GPIO_CH_PIN;
-          GPIO_CL_PORT->BRR  = GPIO_CL_PIN;
-          g_dead_cnt_c = DEAD_TIME_COUNT;
-          break;
-      }
-    }
-    if (g_dead_cnt_c > 0) {
-      g_dead_cnt_c--;
-      if (g_dead_cnt_c == 0) {
-        if (g_state_c == STATE_DEAD_HL) {
-          g_state_c = STATE_LOW;
-          GPIO_CL_PORT->BSRR = GPIO_CL_PIN;
-        } else if (g_state_c == STATE_DEAD_LH) {
-          g_state_c = STATE_HIGH;
-          GPIO_CH_PORT->BSRR = GPIO_CH_PIN;
-        }
-      }
-    }
-  }
+    __asm volatile (
+        // ========== A相处理 ==========
+        "ldr r0, =g_phase_cnt_a \n\t"
+        "ldr r1, =g_period_a \n\t"
+        "ldr r2, =g_high_cnt_a \n\t"
+        "ldr r3, =g_state_a \n\t"
+        
+        "ldrh r4, [r0] \n\t"         // r4 = g_phase_cnt_a
+        "add r4, r4, #1 \n\t"        // g_phase_cnt_a++
+        "strh r4, [r0] \n\t"         // 保存
+        
+        "ldrh r5, [r1] \n\t"         // r5 = g_period_a
+        "cmp r4, r5 \n\t"            // if (cnt >= period)
+        "blt a_check_high \n\t"
+        
+        // A相复位到HIGH
+        "mov r4, #0 \n\t"
+        "strh r4, [r0] \n\t"         // g_phase_cnt_a = 0
+        "mov r6, #0 \n\t"
+        "strb r6, [r3] \n\t"         // g_state_a = STATE_HIGH
+        
+        // GPIO: PA8=1, PB13=0
+        "ldr r7, =0x48000018 \n\t"   // GPIOA BSRR (基地址0x48000000)
+        "ldr r6, =0x00000100 \n\t"   // PA8 set
+        "str r6, [r7] \n\t"
+        "ldr r7, =0x48000428 \n\t"   // GPIOB BRR
+        "ldr r6, =0x2000 \n\t"       // PB13 reset
+        "str r6, [r7] \n\t"
+        "b b_phase \n\t"
+        
+        "a_check_high: \n\t"
+        "ldrh r5, [r2] \n\t"         // r5 = g_high_cnt_a
+        "cmp r4, r5 \n\t"            // if (cnt >= high_cnt)
+        "blt b_phase \n\t"
+        "ldrb r6, [r3] \n\t"         // r6 = g_state_a
+        "cmp r6, #0 \n\t"            // if (state == STATE_HIGH)
+        "bne b_phase \n\t"
+        
+        // A相切换到LOW
+        "mov r6, #2 \n\t"
+        "strb r6, [r3] \n\t"         // g_state_a = STATE_LOW
+        "ldr r7, =0x48000028 \n\t"   // GPIOA BRR (基地址0x48000000)
+        "ldr r6, =0x0100 \n\t"       // PA8 reset
+        "str r6, [r7] \n\t"
+        "ldr r7, =0x48000418 \n\t"   // GPIOB BSRR
+        "ldr r6, =0x2000 \n\t"       // PB13 set
+        "str r6, [r7] \n\t"
+        
+        // ========== B相处理 ==========
+        "b_phase: \n\t"
+        "ldr r0, =g_phase_cnt_b \n\t"
+        "ldr r1, =g_period_b \n\t"
+        "ldr r2, =g_high_cnt_b \n\t"
+        "ldr r3, =g_state_b \n\t"
+        
+        "ldrh r4, [r0] \n\t"
+        "add r4, r4, #1 \n\t"
+        "strh r4, [r0] \n\t"
+        
+        "ldrh r5, [r1] \n\t"
+        "cmp r4, r5 \n\t"
+        "blt b_check_high \n\t"
+        
+        // B相复位到HIGH
+        "mov r4, #0 \n\t"
+        "strh r4, [r0] \n\t"
+        "mov r6, #0 \n\t"
+        "strb r6, [r3] \n\t"
+        
+        // GPIO: PA9=1, PB14=0
+        "ldr r7, =0x48000018 \n\t"   // GPIOA BSRR (基地址0x48000000)
+        "ldr r6, =0x00000200 \n\t"   // PA9 set
+        "str r6, [r7] \n\t"
+        "ldr r7, =0x48000428 \n\t"
+        "ldr r6, =0x4000 \n\t"       // PB14 reset
+        "str r6, [r7] \n\t"
+        "b c_phase \n\t"
+        
+        "b_check_high: \n\t"
+        "ldrh r5, [r2] \n\t"
+        "cmp r4, r5 \n\t"
+        "blt c_phase \n\t"
+        "ldrb r6, [r3] \n\t"
+        "cmp r6, #0 \n\t"
+        "bne c_phase \n\t"
+        
+        // B相切换到LOW
+        "mov r6, #2 \n\t"
+        "strb r6, [r3] \n\t"
+        "ldr r7, =0x48000028 \n\t"   // GPIOA BRR (基地址0x48000000)
+        "ldr r6, =0x0200 \n\t"       // PA9 reset
+        "str r6, [r7] \n\t"
+        "ldr r7, =0x48000418 \n\t"
+        "ldr r6, =0x4000 \n\t"       // PB14 set
+        "str r6, [r7] \n\t"
+        
+        // ========== C相处理 ==========
+        "c_phase: \n\t"
+        "ldr r0, =g_phase_cnt_c \n\t"
+        "ldr r1, =g_period_c \n\t"
+        "ldr r2, =g_high_cnt_c \n\t"
+        "ldr r3, =g_state_c \n\t"
+        
+        "ldrh r4, [r0] \n\t"
+        "add r4, r4, #1 \n\t"
+        "strh r4, [r0] \n\t"
+        
+        "ldrh r5, [r1] \n\t"
+        "cmp r4, r5 \n\t"
+        "blt c_check_high \n\t"
+        
+        // C相复位到HIGH
+        "mov r4, #0 \n\t"
+        "strh r4, [r0] \n\t"
+        "mov r6, #0 \n\t"
+        "strb r6, [r3] \n\t"
+        
+        // GPIO: PA10=1, PB1=0
+        "ldr r7, =0x48000018 \n\t"   // GPIOA BSRR (基地址0x48000000)
+        "ldr r6, =0x00000400 \n\t"   // PA10 set
+        "str r6, [r7] \n\t"
+        "ldr r7, =0x48000428 \n\t"
+        "ldr r6, =0x0002 \n\t"       // PB1 reset
+        "str r6, [r7] \n\t"
+        "b done_asm \n\t"
+        
+        "c_check_high: \n\t"
+        "ldrh r5, [r2] \n\t"
+        "cmp r4, r5 \n\t"
+        "blt done_asm \n\t"
+        "ldrb r6, [r3] \n\t"
+        "cmp r6, #0 \n\t"
+        "bne done_asm \n\t"
+        
+        // C相切换到LOW
+        "mov r6, #2 \n\t"
+        "strb r6, [r3] \n\t"
+        "ldr r7, =0x48000028 \n\t"   // GPIOA BRR (基地址0x48000000)
+        "ldr r6, =0x0400 \n\t"       // PA10 reset
+        "str r6, [r7] \n\t"
+        "ldr r7, =0x48000418 \n\t"
+        "ldr r6, =0x0002 \n\t"       // PB1 set
+        "str r6, [r7] \n\t"
+        
+        "done_asm: \n\t"
+        : // 无输出
+        : // 无输入
+        : "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7", "memory", "cc"
+    );
 }
 
-// ========== TIM2 计算中断 (20kHz) - 计算三相半周期 ==========
+// TIM7 10kHz中断 - 计算三相参数（使用查表法加速）
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-  static float32_t phase_deg = 0.0f;
+  static uint16_t phase_idx = 0;  // 查表索引 0-359
   
-  if (htim->Instance == TIM2)
+  if (htim->Instance == TIM7)
   {
-    // 50Hz相位递增 (20kHz中断频率)
-    phase_deg += g_out_freq_hz * 360.0f / 20000.0f;
-    if (phase_deg >= 360.0f) {
-      phase_deg -= 360.0f;
+    // 更新相位索引 (50Hz / 10000Hz * 360 = 1.8度/次)
+    phase_idx += (uint16_t)(g_out_freq_hz * 360.0f / 10000.0f);
+    if (phase_idx >= 360) {
+      phase_idx -= 360;
     }
     
-    // 计算三相频率对应的半周期计数值
-    // 半周期 = (60kHz / f_sw) / 2
-    float32_t sin_a, sin_b, sin_c;
-    arm_sin_cos_f32(phase_deg, &sin_a, NULL);
-    arm_sin_cos_f32(phase_deg + 120.0f, &sin_b, NULL);
-    arm_sin_cos_f32(phase_deg + 240.0f, &sin_c, NULL);
+    // 查表获取sin/cos值（比arm_sin_cos_f32快10-100倍）
+    float32_t sin_a = sin_table[phase_idx];
+    float32_t cos_a = sin_table[(phase_idx + 90) % 360];
     
-    // TCM ZVS频率调制
+    // 三相120度偏移
+    float32_t sin_b = -0.5f * sin_a + 0.866025404f * cos_a;
+    float32_t sin_c = -0.5f * sin_a - 0.866025404f * cos_a;
+    
     float32_t f_a = g_fsw_center + g_fsw_delta * sin_a * g_voltage_output;
     float32_t f_b = g_fsw_center + g_fsw_delta * sin_b * g_voltage_output;
     float32_t f_c = g_fsw_center + g_fsw_delta * sin_c * g_voltage_output;
+
+    uint16_t new_period_a = (uint16_t)(TIM1_IRQ_FREQ / f_a);
+    uint16_t new_period_b = (uint16_t)(TIM1_IRQ_FREQ / f_b);
+    uint16_t new_period_c = (uint16_t)(TIM1_IRQ_FREQ / f_c);
     
-    // 转换为半周期计数值 (TIM1中断频率60kHz)
-    // half_period = TIM1_IRQ_FREQ / (2 * f_sw)
-    g_half_period_a = (uint16_t)(TIM1_IRQ_FREQ / (2.0f * f_a));
-    g_half_period_b = (uint16_t)(TIM1_IRQ_FREQ / (2.0f * f_b));
-    g_half_period_c = (uint16_t)(TIM1_IRQ_FREQ / (2.0f * f_c));
+    uint16_t new_high_a = (uint16_t)(new_period_a * g_duty_cycle);
+    uint16_t new_high_b = (uint16_t)(new_period_b * g_duty_cycle);
+    uint16_t new_high_c = (uint16_t)(new_period_c * g_duty_cycle);
     
-    // 限制最小值，防止频率过高
-    if (g_half_period_a < 5) g_half_period_a = 5;
-    if (g_half_period_b < 5) g_half_period_b = 5;
-    if (g_half_period_c < 5) g_half_period_c = 5;
+    // A相同步
+    if (g_phase_cnt_a >= new_period_a) {
+        g_phase_cnt_a = 0;
+        g_state_a = STATE_HIGH;
+        GPIO_AH_PORT->BSRR = GPIO_AH_PIN;
+        GPIO_AL_PORT->BRR  = GPIO_AL_PIN;
+    } else if (g_state_a == STATE_HIGH && g_phase_cnt_a >= new_high_a) {
+        GPIO_AH_PORT->BRR  = GPIO_AH_PIN;
+        GPIO_AL_PORT->BSRR = GPIO_AL_PIN;
+        g_state_a = STATE_LOW;
+    }
+    g_period_a = new_period_a;
+    g_high_cnt_a = new_high_a;
+    
+    // B相同步
+    if (g_phase_cnt_b >= new_period_b) {
+        g_phase_cnt_b = 0;
+        g_state_b = STATE_HIGH;
+        GPIO_BH_PORT->BSRR = GPIO_BH_PIN;
+        GPIO_BL_PORT->BRR  = GPIO_BL_PIN;
+    } else if (g_state_b == STATE_HIGH && g_phase_cnt_b >= new_high_b) {
+        GPIO_BH_PORT->BRR  = GPIO_BH_PIN;
+        GPIO_BL_PORT->BSRR = GPIO_BL_PIN;
+        g_state_b = STATE_LOW;
+    }
+    g_period_b = new_period_b;
+    g_high_cnt_b = new_high_b;
+    
+    // C相同步
+    if (g_phase_cnt_c >= new_period_c) {
+        g_phase_cnt_c = 0;
+        g_state_c = STATE_HIGH;
+        GPIO_CH_PORT->BSRR = GPIO_CH_PIN;
+        GPIO_CL_PORT->BRR  = GPIO_CL_PIN;
+    } else if (g_state_c == STATE_HIGH && g_phase_cnt_c >= new_high_c) {
+        GPIO_CH_PORT->BRR  = GPIO_CH_PIN;
+        GPIO_CL_PORT->BSRR = GPIO_CL_PIN;
+        g_state_c = STATE_LOW;
+    }
+    g_period_c = new_period_c;
+    g_high_cnt_c = new_high_c;
   }
 }
 /* USER CODE END 4 */
